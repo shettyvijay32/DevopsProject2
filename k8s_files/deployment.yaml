@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: pandacloud-container
-        image: 376129842280.dkr.ecr.ap-south-1.amazonaws.com/amazon-prime-app1:latest
+        image: vijaytechnologies/swiggy:latest
         ports:
         - containerPort: 3000
 ...
