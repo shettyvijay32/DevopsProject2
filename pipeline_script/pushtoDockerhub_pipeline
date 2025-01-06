@@ -1,0 +1,127 @@
+pipeline {
+    agent any
+    
+    parameters {
+        booleanParam(name: 'SKIP_STAGES', defaultValue: false, description: 'Skip certain stages in the pipeline')
+        string(name: 'DOCKER_HUB_REPO_NAME', defaultValue: 'your-dockerhub-username/your-repository', description: 'Enter Docker Hub repository name')
+    }
+    
+    tools {
+        jdk 'JDK'
+        nodejs 'NodeJS'
+    }
+    
+    environment {
+        SCANNER_HOME = tool 'SonarQube Scanner'
+    }
+    
+    stages {
+        stage('1. Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/shettyvijay32/DevopsProject2.git'
+            }
+        }
+        
+        stage('2. SonarQube Analysis') {
+            steps {
+                script {
+                    if (!params.SKIP_STAGES) {
+                        withSonarQubeEnv ('sonar-server') {
+                            sh """
+                            $SCANNER_HOME/bin/sonar-scanner \
+                            -Dsonar.projectName=amazon-prime \
+                            -Dsonar.projectKey=amazon-prime
+                            """
+                        }
+                    } else {
+                        echo "Skipping SonarQube Analysis"
+                    }
+                }
+            }
+        }
+        
+        stage('3. Quality Gate') {
+            steps {
+                script {
+                    if (!params.SKIP_STAGES) {
+                        waitForQualityGate abortPipeline: false, 
+                        credentialsId: 'sonar-token'
+                    } else {
+                        echo "Skipping Quality Gate"
+                    }
+                }
+            }
+        }
+        
+        stage('4. Install npm') {
+            steps {
+                script {
+                    if (!params.SKIP_STAGES) {
+                        sh "npm install"
+                    } else {
+                        echo "Skipping npm installation"
+                    }
+                }
+            }
+        }
+        
+        stage('5. Trivy Scan') {
+            steps {
+                script {
+                    if (!params.SKIP_STAGES) {
+                        sh "trivy fs . > trivy.txt"
+                    } else {
+                        echo "Skipping Trivy Scan"
+                    }
+                }
+            }
+        }
+        
+        stage('6. Build Docker Image') {
+            steps {
+                sh "docker build -t ${params.DOCKER_HUB_REPO_NAME} ."
+            }
+        }
+        
+        stage('7. Docker Hub Login') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKER_HUB_USERNAME', passwordVariable: 'DOCKER_HUB_PASSWORD')]) {
+                    script {
+                        // Using --password-stdin for secure login
+                        sh """
+                        echo ${DOCKER_HUB_PASSWORD} | docker login -u ${DOCKER_HUB_USERNAME} --password-stdin
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('8. Tag Docker Image') {
+            steps {
+                sh """
+                docker tag ${params.DOCKER_HUB_REPO_NAME} ${params.DOCKER_HUB_REPO_NAME}:${BUILD_NUMBER}
+                docker tag ${params.DOCKER_HUB_REPO_NAME} ${params.DOCKER_HUB_REPO_NAME}:latest
+                """
+            }
+        }
+        
+        stage('9. Push Image to Docker Hub') {
+            steps {
+                sh """
+                docker push ${params.DOCKER_HUB_REPO_NAME}:${BUILD_NUMBER}
+                docker push ${params.DOCKER_HUB_REPO_NAME}:latest
+                """
+            }
+        }
+        
+        stage('10. Cleanup Images') {
+            steps {
+                sh """
+                docker rmi ${params.DOCKER_HUB_REPO_NAME}:${BUILD_NUMBER}
+                docker rmi ${params.DOCKER_HUB_REPO_NAME}:latest
+                docker images
+                """
+            }
+        }
+    }
+}
